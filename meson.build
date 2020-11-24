@@ -31,6 +31,25 @@ configuration_inc = include_directories('.')
 
 drm_dep = dependency('libdrm', version: '>= 2.4.89')
 
+enable_tests = get_option('enable-tests')
+
+if enable_tests
+  check_dep = dependency('check')
+
+# Default to the system provided version of fff.h.
+# otherwise fetch it ourselves.
+  if cc.check_header('fff.h')
+    fff_dep = declare_dependency()
+  else
+    if meson.version().version_compare('>=0.55')
+      fff_proj = subproject('fff')
+      fff_dep = fff_proj.get_variable('fff_dep')
+    else
+      error('Update meson version to >=0.55 to enable unit testing')
+    endif
+  endif
+endif
+
 subdir('common')
 subdir('drm-lease-manager')
 subdir('libdlmclient')
