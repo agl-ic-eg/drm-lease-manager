@@ -3,6 +3,13 @@ libdlmcommon_sources = [
         'log.c'
 ]
 
+libdlmcommon_inc = [include_directories('.')]
+
+if enable_tests
+    libdlmcommon_inc += include_directories('test')
+    libdlmcommon_sources += ['test/test-helpers.c']
+endif
+
 libdlmcommon = static_library(
         'common',
         sources: libdlmcommon_sources,
@@ -11,5 +18,5 @@ libdlmcommon = static_library(
 
 dlmcommon_dep = declare_dependency(
     link_with : libdlmcommon,
-    include_directories : include_directories('.')
+    include_directories : libdlmcommon_inc
 )

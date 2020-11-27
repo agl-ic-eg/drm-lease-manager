@@ -28,3 +28,7 @@ pkg.generate(
 
 public_header_dir = meson.current_source_dir()
 subdir('docs')
+
+if enable_tests
+  subdir('test')
+endif
