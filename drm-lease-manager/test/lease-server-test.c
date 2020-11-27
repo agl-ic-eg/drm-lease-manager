@@ -1,0 +1,331 @@
+#include <check.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <pthread.h>
+
+#include "lease-server.h"
+#include "log.h"
+#include "test-helpers.h"
+#include "test-socket-client.h"
+
+#define SOCKETDIR "/tmp"
+
+#define TEST_LEASE_ID 50
+
+/************** Test fixutre functions *************************/
+struct test_config default_test_config;
+
+#define STR(x) #x
+#define TO_STR(x) STR(x)
+#define TEST_CLIENT_PATH SOCKETDIR "/dlm_connector-" TO_STR(TEST_LEASE_ID)
+
+static void test_setup(void)
+{
+	dlm_log_enable_debug(true);
+	setenv("DLM_SOCKET_PATH", SOCKETDIR, 1);
+
+	default_test_config = (struct test_config){
+	    .lease_id = TEST_LEASE_ID,
+	};
+	// FIXME: Remove this once the server can do the unlinking on its own
+	unlink(TEST_CLIENT_PATH);
+}
+
+static void test_shutdown(void)
+{
+	test_config_cleanup(&default_test_config);
+}
+
+static struct ls *create_default_server(void)
+{
+	uint32_t id = TEST_LEASE_ID;
+	struct ls *ls = ls_create(&id, 1);
+	ck_assert_ptr_ne(ls, NULL);
+	return ls;
+}
+
+/**************  Lease server error handling tests *************/
+
+/* duplicate_server_failure
+ *
+ * Test details: Try to intialize the same server twice
+ * Expected results: ls_create() fails.
+ */
+START_TEST(duplicate_server_failure)
+{
+	uint32_t ids[] = {TEST_LEASE_ID, TEST_LEASE_ID};
+	struct ls *ls = ls_create(ids, 2);
+	ck_assert_ptr_eq(ls, NULL);
+}
+END_TEST
+
+static void add_error_tests(Suite *s)
+{
+	TCase *tc = tcase_create("Lease server errors");
+
+	tcase_add_checked_fixture(tc, test_setup, test_shutdown);
+
+	tcase_add_test(tc, duplicate_server_failure);
+	suite_add_tcase(s, tc);
+}
+
+/**************  Client request handling tests ************/
+
+/* Test the handling of client requests.  Make sure that the
+ * proper struct ls_req are generated for each client request.
+ */
+
+static void get_and_check_request(struct ls *ls, int expected_index,
+				  enum ls_req_type expected_type)
+{
+	struct ls_req req;
+	bool req_valid = ls_get_request(ls, &req);
+	ck_assert_int_eq(req_valid, true);
+	ck_assert_int_eq(req.lease_index, expected_index);
+	ck_assert_int_eq(req.type, expected_type);
+}
+
+/* Asynchronous version of the above.  Has the extra overhead of
+ * spawning a new thread, so should be used sparingly. */
+struct async_req {
+	pthread_t tid;
+	struct ls *ls;
+
+	bool req_valid;
+	struct ls_req expected;
+	struct ls_req actual;
+};
+
+static void *get_request_thread(void *arg)
+{
+	struct async_req *async_req = arg;
+	async_req->req_valid =
+	    ls_get_request(async_req->ls, &async_req->actual);
+
+	return NULL;
+}
+
+static struct async_req *
+get_and_check_request_async(struct ls *ls, int expected_index,
+			    enum ls_req_type expected_type)
+
+{
+	struct async_req *req = malloc(sizeof(struct async_req));
+	ck_assert_ptr_ne(req, NULL);
+
+	*req = (struct async_req){
+	    .ls = ls,
+	    .expected =
+		{
+		    .lease_index = expected_index,
+		    .type = expected_type,
+		},
+	};
+
+	int ret = pthread_create(&req->tid, NULL, get_request_thread, req);
+	ck_assert_int_eq(ret, 0);
+
+	return req;
+}
+
+static void check_async_req_result(struct async_req *req)
+{
+
+	pthread_join(req->tid, NULL);
+	ck_assert_int_eq(req->req_valid, true);
+	ck_assert_int_eq(req->actual.lease_index, req->expected.lease_index);
+	ck_assert_int_eq(req->actual.type, req->expected.type);
+	free(req);
+}
+
+/* issue_lease_request_and_release
+ *
+ * Test details: Generate a lease request and lease release command from
+ *               a client.
+ * Expected results: One get lease and one release lease request are returned
+ *                   from ls_get_request().
+ */
+START_TEST(issue_lease_request_and_release)
+{
+	struct ls *ls = create_default_server();
+
+	struct client_state *cstate = test_client_start(&default_test_config);
+
+	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	test_client_stop(cstate);
+	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+}
+END_TEST
+
+/* issue_lease_request_and_early_release
+ *
+ * Test details: Close client connection immediately after connecting (before
+ *               lease request is processed)
+ * Expected results: Should be the same result as
+ * issue_lease_request_and_release.
+ */
+START_TEST(issue_lease_request_and_early_release)
+{
+	struct ls *ls = create_default_server();
+
+	struct client_state *cstate = test_client_start(&default_test_config);
+
+	test_client_stop(cstate);
+	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+}
+END_TEST
+
+/* issue_multiple_lease_requests
+ *
+ * Test details: Generate multiple lease requests to the same lease server from
+ *               multiple clients at the same time
+ * Expected results: One get lease and one release lease request are returned
+ *                   from ls_get_request().
+ *                   Requests from all but the first client are rejected
+ *                   (sockets are closed).
+ */
+START_TEST(issue_multiple_lease_requests)
+{
+	struct ls *ls = ls_create((uint32_t[]){TEST_LEASE_ID}, 1);
+
+	struct test_config accepted_config;
+	struct client_state *accepted_cstate;
+
+	accepted_config = default_test_config;
+	accepted_cstate = test_client_start(&accepted_config);
+	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+
+	/*Try to make additional connections while the first is still
+	 *connected. */
+	const int nextra_clients = 2;
+	struct test_config extra_configs[nextra_clients];
+	struct client_state *extra_cstates[nextra_clients];
+
+	for (int i = 0; i < nextra_clients; i++) {
+		extra_configs[i] = default_test_config;
+		extra_cstates[i] = test_client_start(&extra_configs[i]);
+	}
+
+	// Start asyncronously checking for the accepted client to release.
+	struct async_req *async_release_req =
+	    get_and_check_request_async(ls, 0, LS_REQ_RELEASE_LEASE);
+
+	for (int i = 0; i < nextra_clients; i++) {
+		test_client_stop(extra_cstates[i]);
+	}
+
+	/* Release the first connection and check results */
+	test_client_stop(accepted_cstate);
+	check_async_req_result(async_release_req);
+
+	/* Only one connection should be granted access by the lease manager */
+	ck_assert_int_eq(accepted_config.connection_completed, true);
+	for (int i = 0; i < nextra_clients; i++)
+		ck_assert_int_eq(extra_configs[i].connection_completed, false);
+}
+END_TEST
+
+static void add_client_request_tests(Suite *s)
+{
+	TCase *tc = tcase_create("Client request testing");
+
+	tcase_add_checked_fixture(tc, test_setup, test_shutdown);
+
+	tcase_add_test(tc, issue_lease_request_and_release);
+	tcase_add_test(tc, issue_lease_request_and_early_release);
+	tcase_add_test(tc, issue_multiple_lease_requests);
+	suite_add_tcase(s, tc);
+}
+
+/**************  File descriptor sending tests ************/
+
+/* Test the sending (and failure to send) of file descriptors
+ * to the client.
+ */
+
+/* send_fd_to_client
+ *
+ * Test details: Send a valid fd to a given client.
+ * Expected results: The correct fd is successfully sent.
+ */
+START_TEST(send_fd_to_client)
+{
+	struct ls *ls = create_default_server();
+
+	struct client_state *cstate = test_client_start(&default_test_config);
+
+	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+
+	/* send an fd to the client*/
+	int test_fd = get_dummy_fd();
+	ck_assert_int_eq(ls_send_fd(ls, 0, test_fd), true);
+
+	test_client_stop(cstate);
+	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+
+	ck_assert_int_eq(default_test_config.connection_completed, true);
+	ck_assert_int_eq(default_test_config.has_data, true);
+	check_fd_equality(test_fd, default_test_config.received_fd);
+}
+END_TEST
+
+/* ls_send_fd_is_noop_when_fd_is_invalid
+ *
+ * Test details: Call ls_send_fd() with an invalid  fd.
+ * Expected results: No fd is sent to client.  The connection to the
+ *                   client is closed.
+ */
+START_TEST(ls_send_fd_is_noop_when_fd_is_invalid)
+{
+	struct ls *ls = create_default_server();
+
+	struct client_state *cstate = test_client_start(&default_test_config);
+
+	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+
+	int invalid_fd = get_dummy_fd();
+	close(invalid_fd);
+
+	ck_assert_int_eq(ls_send_fd(ls, 0, invalid_fd), false);
+
+	test_client_stop(cstate);
+	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+	ck_assert_int_eq(default_test_config.connection_completed, true);
+	ck_assert_int_eq(default_test_config.has_data, false);
+}
+END_TEST
+
+static void add_fd_send_tests(Suite *s)
+{
+	TCase *tc = tcase_create("File descriptor sending tests");
+
+	tcase_add_checked_fixture(tc, test_setup, test_shutdown);
+
+	tcase_add_test(tc, send_fd_to_client);
+	tcase_add_test(tc, ls_send_fd_is_noop_when_fd_is_invalid);
+	suite_add_tcase(s, tc);
+}
+
+int main(void)
+{
+	int number_failed;
+	Suite *s;
+	SRunner *sr;
+
+	s = suite_create("DLM lease server tests");
+
+	add_error_tests(s);
+	add_client_request_tests(s);
+	add_fd_send_tests(s);
+
+	sr = srunner_create(s);
+
+	srunner_run_all(sr, CK_NORMAL);
+	number_failed = srunner_ntests_failed(sr);
+	srunner_free(sr);
+	return (number_failed == 0) ? EXIT_SUCCESS : EXIT_FAILURE;
+}

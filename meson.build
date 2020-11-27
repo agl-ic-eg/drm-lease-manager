@@ -51,6 +51,6 @@ if enable_tests
 endif
 
 subdir('common')
-subdir('drm-lease-manager')
 subdir('libdlmclient')
+subdir('drm-lease-manager')
 subdir('examples')
