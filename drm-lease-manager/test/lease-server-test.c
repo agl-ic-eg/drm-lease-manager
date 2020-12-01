@@ -17,7 +17,6 @@
 struct test_config default_test_config;
 
 #define TEST_LEASE_NAME "test-lease"
-#define TEST_CLIENT_PATH SOCKETDIR "/" TEST_LEASE_NAME
 
 static struct lease_handle test_lease = {
     .name = TEST_LEASE_NAME,
@@ -31,8 +30,6 @@ static void test_setup(void)
 	default_test_config = (struct test_config){
 	    .lease = &test_lease,
 	};
-	// FIXME: Remove this once the server can do the unlinking on its own
-	unlink(TEST_CLIENT_PATH);
 }
 
 static void test_shutdown(void)

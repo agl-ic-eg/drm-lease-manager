@@ -4,14 +4,18 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
 #include <sys/epoll.h>
+#include <sys/file.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+#define SOCK_LOCK_SUFFIX ".lock"
 
 struct ls_socket {
 	int fd;
@@ -21,6 +25,7 @@ struct ls_socket {
 struct ls_server {
 	struct lease_handle *lease_handle;
 	struct sockaddr_un address;
+	int server_socket_lock;
 
 	struct ls_socket listen;
 	struct ls_socket client;
@@ -68,6 +73,40 @@ static bool client_connect(struct ls *ls, struct ls_server *serv)
 	return true;
 }
 
+static int create_socket_lock(struct sockaddr_un *addr)
+{
+	int lock_fd;
+
+	int lockfile_len = sizeof(addr->sun_path) + sizeof(SOCK_LOCK_SUFFIX);
+	char lockfile[lockfile_len];
+	int len = snprintf(lockfile, lockfile_len, "%s%s", addr->sun_path,
+			   SOCK_LOCK_SUFFIX);
+
+	if (len < 0 || len >= lockfile_len) {
+		DEBUG_LOG("Can't create socket lock filename\n");
+		return -1;
+	}
+
+	lock_fd = open(lockfile, O_CREAT | O_RDWR,
+		       S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
+
+	if (lock_fd < 0) {
+		ERROR_LOG("Cannot access runtime directory\n");
+		return -1;
+	}
+
+	if (flock(lock_fd, LOCK_EX | LOCK_NB)) {
+		ERROR_LOG(
+		    "socket %s: in use.  Possible duplicate lease name or "
+		    "mutiple drm-lease-manager instances running\n",
+		    addr->sun_path);
+		close(lock_fd);
+		return -1;
+	}
+
+	return lock_fd;
+}
+
 static bool server_setup(struct ls *ls, struct ls_server *serv,
 			 struct lease_handle *lease_handle)
 {
@@ -75,6 +114,14 @@ static bool server_setup(struct ls *ls, struct ls_server *serv,
 
 	if (!sockaddr_set_lease_server_path(address, lease_handle->name))
 		return false;
+
+	int socket_lock = create_socket_lock(address);
+	if (socket_lock < 0)
+		return false;
+
+	/* The socket address is now owned by this instance, so any existing
+	 * sockets can safely be removed */
+	unlink(address->sun_path);
 
 	address->sun_family = AF_UNIX;
 
@@ -101,6 +148,7 @@ static bool server_setup(struct ls *ls, struct ls_server *serv,
 
 	serv->is_client_connected = false;
 	serv->lease_handle = lease_handle;
+	serv->server_socket_lock = socket_lock;
 	serv->listen.fd = server_socket;
 	serv->listen.serv = serv;
 
@@ -131,6 +179,7 @@ static void server_shutdown(struct ls *ls, struct ls_server *serv)
 	epoll_ctl(ls->epoll_fd, EPOLL_CTL_DEL, serv->listen.fd, NULL);
 	close(serv->listen.fd);
 	ls_disconnect_client(ls, serv);
+	close(serv->server_socket_lock);
 }
 
 struct ls *ls_create(struct lease_handle **lease_handles, int count)
