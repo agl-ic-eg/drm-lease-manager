@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SOCKET_PATH STATEDIR "/run/drm-lease-manager"
+#define SOCKET_PATH DLM_DEFAULT_RUNTIME_PATH
 
 bool sockaddr_set_lease_server_path(struct sockaddr_un *sa,
 				    const char *lease_name)

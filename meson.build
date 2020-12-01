@@ -16,7 +16,11 @@ compiler_flags = [
     '-Wmissing-prototypes',
 ]
 
-config.set_quoted('STATEDIR', get_option('localstatedir'))
+#Setup and create runtime path
+runtime_path = join_paths(get_option('localstatedir'), get_option('runtime_subdir'))
+config.set_quoted('DLM_DEFAULT_RUNTIME_PATH', runtime_path)
+
+meson.add_install_script('sh', '-c', 'install -d $DESTDIR/$1', '_', runtime_path)
 
 cc = meson.get_compiler('c')
 add_project_arguments(

@@ -9,3 +9,9 @@ option('enable-tests',
     value: false,
     description: 'Build unit tests'
 )
+
+option('runtime_subdir',
+    type: 'string',
+    value: 'run/drm-lease-manager',
+    description: 'subdirectory to use for runtime data'
+)
