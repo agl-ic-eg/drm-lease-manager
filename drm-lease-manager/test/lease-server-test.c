@@ -62,6 +62,22 @@ START_TEST(duplicate_server_failure)
 }
 END_TEST
 
+START_TEST(long_lease_name_failure)
+{
+	char long_lease_name[200];
+
+	size_t len = sizeof(long_lease_name) - 1;
+	memset(long_lease_name, 'a', len);
+	long_lease_name[len] = '\0';
+
+	struct lease_handle long_name_lease = {.name = long_lease_name};
+
+	struct lease_handle *leases[] = {&long_name_lease};
+	struct ls *ls = ls_create(leases, 1);
+	ck_assert_ptr_eq(ls, NULL);
+}
+END_TEST
+
 static void add_error_tests(Suite *s)
 {
 	TCase *tc = tcase_create("Lease server errors");
@@ -69,6 +85,7 @@ static void add_error_tests(Suite *s)
 	tcase_add_checked_fixture(tc, test_setup, test_shutdown);
 
 	tcase_add_test(tc, duplicate_server_failure);
+	tcase_add_test(tc, long_lease_name_failure);
 	suite_add_tcase(s, tc);
 }
 
