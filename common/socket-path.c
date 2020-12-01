@@ -7,13 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SOCKET_PATH DLM_DEFAULT_RUNTIME_PATH
+#define RUNTIME_PATH DLM_DEFAULT_RUNTIME_PATH
 
 bool sockaddr_set_lease_server_path(struct sockaddr_un *sa,
 				    const char *lease_name)
 {
 	int maxlen = sizeof(sa->sun_path);
-	char *socket_dir = getenv("DLM_SOCKET_PATH") ?: SOCKET_PATH;
+	char *socket_dir = getenv("DLM_RUNTIME_PATH") ?: RUNTIME_PATH;
 
 	int len =
 	    snprintf(sa->sun_path, maxlen, "%s/%s", socket_dir, lease_name);

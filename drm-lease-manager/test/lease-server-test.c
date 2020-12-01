@@ -26,7 +26,7 @@ static struct lease_handle test_lease = {
 static void test_setup(void)
 {
 	dlm_log_enable_debug(true);
-	setenv("DLM_SOCKET_PATH", SOCKETDIR, 1);
+	setenv("DLM_RUNTIME_PATH", SOCKETDIR, 1);
 
 	default_test_config = (struct test_config){
 	    .lease = &test_lease,

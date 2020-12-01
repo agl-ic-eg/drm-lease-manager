@@ -21,7 +21,7 @@ struct test_config default_test_config;
 static void test_setup(void)
 {
 	dlm_enable_debug_log(true);
-	setenv("DLM_SOCKET_PATH", SOCKETDIR, 1);
+	setenv("DLM_RUNTIME_PATH", SOCKETDIR, 1);
 
 	default_test_config = (struct test_config){
 	    .lease_name = TEST_LEASE_NAME,
