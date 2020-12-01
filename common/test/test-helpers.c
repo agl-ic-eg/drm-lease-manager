@@ -31,3 +31,11 @@ void check_fd_is_closed(int fd)
 	ck_assert_int_ne(fstat(fd, &st), 0);
 	ck_assert_int_eq(errno, EBADF);
 }
+
+void check_uint_array_eq(const uint32_t *a, const uint32_t *b, int cnt)
+{
+	for (int i = 0; i < cnt; i++) {
+		ck_assert_msg(a[i] == b[i], "Array diff at index %d (%u != %u)",
+			      i, a[i], b[i]);
+	}
+}

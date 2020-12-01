@@ -1,6 +1,8 @@
 #ifndef TEST_HELPERS_H
 #define TEST_HELPERS_H
 
+#include <stdint.h>
+
 #define UNUSED(x) (void)(x)
 #define ARRAY_LEN(x) ((int)(sizeof(x) / sizeof(x[0])))
 
@@ -12,4 +14,6 @@ int get_dummy_fd(void);
 void check_fd_equality(int fd1, int fd2);
 void check_fd_is_open(int fd);
 void check_fd_is_closed(int fd);
+
+void check_uint_array_eq(const uint32_t *a, const uint32_t *b, int cnt);
 #endif
