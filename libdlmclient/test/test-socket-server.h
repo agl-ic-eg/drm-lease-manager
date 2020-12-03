@@ -1,9 +1,9 @@
 #ifndef TEST_SOCKET_SERVER_H
 #define TEST_SOCKET_SERVER_H
 #include <stdbool.h>
-#include <stdint.h>
+
 struct test_config {
-	uint32_t lease_id;
+	char *lease_name;
 	int nfds;
 	int *fds;
 

@@ -86,7 +86,8 @@ static void *test_client_thread(void *arg)
 	};
 
 	ck_assert_int_eq(
-	    sockaddr_set_lease_server_path(&address, config->lease_id), true);
+	    sockaddr_set_lease_server_path(&address, config->lease->name),
+	    true);
 
 	int client = socket(PF_UNIX, SOCK_STREAM, 0);
 	ck_assert_int_ge(client, 0);

@@ -22,13 +22,13 @@ struct dlm_lease {
 	int lease_fd;
 };
 
-static bool lease_connect(struct dlm_lease *lease, uint32_t id)
+static bool lease_connect(struct dlm_lease *lease, char *name)
 {
 	struct sockaddr_un sa = {
 	    .sun_family = AF_UNIX,
 	};
 
-	if (!sockaddr_set_lease_server_path(&sa, id))
+	if (!sockaddr_set_lease_server_path(&sa, name))
 		return false;
 
 	int dlm_server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -114,7 +114,7 @@ static bool lease_recv_fd(struct dlm_lease *lease)
 	return true;
 }
 
-struct dlm_lease *dlm_get_lease(uint32_t id)
+struct dlm_lease *dlm_get_lease(char *name)
 {
 	struct dlm_lease *lease = calloc(1, sizeof(struct dlm_lease));
 	if (!lease) {
@@ -122,7 +122,7 @@ struct dlm_lease *dlm_get_lease(uint32_t id)
 		return NULL;
 	}
 
-	if (!lease_connect(lease, id)) {
+	if (!lease_connect(lease, name)) {
 		free(lease);
 		return NULL;
 	}

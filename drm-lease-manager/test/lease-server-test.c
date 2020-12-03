@@ -13,14 +13,15 @@
 
 #define SOCKETDIR "/tmp"
 
-#define TEST_LEASE_ID 50
-
 /************** Test fixutre functions *************************/
 struct test_config default_test_config;
 
-#define STR(x) #x
-#define TO_STR(x) STR(x)
-#define TEST_CLIENT_PATH SOCKETDIR "/dlm_connector-" TO_STR(TEST_LEASE_ID)
+#define TEST_LEASE_NAME "test-lease"
+#define TEST_CLIENT_PATH SOCKETDIR "/" TEST_LEASE_NAME
+
+static struct lease_handle test_lease = {
+    .name = TEST_LEASE_NAME,
+};
 
 static void test_setup(void)
 {
@@ -28,7 +29,7 @@ static void test_setup(void)
 	setenv("DLM_SOCKET_PATH", SOCKETDIR, 1);
 
 	default_test_config = (struct test_config){
-	    .lease_id = TEST_LEASE_ID,
+	    .lease = &test_lease,
 	};
 	// FIXME: Remove this once the server can do the unlinking on its own
 	unlink(TEST_CLIENT_PATH);
@@ -41,8 +42,10 @@ static void test_shutdown(void)
 
 static struct ls *create_default_server(void)
 {
-	uint32_t id = TEST_LEASE_ID;
-	struct ls *ls = ls_create(&id, 1);
+	struct lease_handle *leases[] = {
+	    &test_lease,
+	};
+	struct ls *ls = ls_create(leases, 1);
 	ck_assert_ptr_ne(ls, NULL);
 	return ls;
 }
@@ -56,8 +59,8 @@ static struct ls *create_default_server(void)
  */
 START_TEST(duplicate_server_failure)
 {
-	uint32_t ids[] = {TEST_LEASE_ID, TEST_LEASE_ID};
-	struct ls *ls = ls_create(ids, 2);
+	struct lease_handle *leases[] = {&test_lease, &test_lease};
+	struct ls *ls = ls_create(leases, 2);
 	ck_assert_ptr_eq(ls, NULL);
 }
 END_TEST
@@ -78,14 +81,22 @@ static void add_error_tests(Suite *s)
  * proper struct ls_req are generated for each client request.
  */
 
-static void get_and_check_request(struct ls *ls, int expected_index,
+static void check_request(struct ls_req *req,
+			  struct lease_handle *expected_lease,
+			  enum ls_req_type expected_type)
+{
+	ck_assert_ptr_eq(req->lease_handle, expected_lease);
+	ck_assert_int_eq(req->type, expected_type);
+}
+
+static void get_and_check_request(struct ls *ls,
+				  struct lease_handle *expected_lease,
 				  enum ls_req_type expected_type)
 {
 	struct ls_req req;
 	bool req_valid = ls_get_request(ls, &req);
 	ck_assert_int_eq(req_valid, true);
-	ck_assert_int_eq(req.lease_index, expected_index);
-	ck_assert_int_eq(req.type, expected_type);
+	check_request(&req, expected_lease, expected_type);
 }
 
 /* Asynchronous version of the above.  Has the extra overhead of
@@ -109,7 +120,7 @@ static void *get_request_thread(void *arg)
 }
 
 static struct async_req *
-get_and_check_request_async(struct ls *ls, int expected_index,
+get_and_check_request_async(struct ls *ls, struct lease_handle *expected_lease,
 			    enum ls_req_type expected_type)
 
 {
@@ -120,7 +131,7 @@ get_and_check_request_async(struct ls *ls, int expected_index,
 	    .ls = ls,
 	    .expected =
 		{
-		    .lease_index = expected_index,
+		    .lease_handle = expected_lease,
 		    .type = expected_type,
 		},
 	};
@@ -136,8 +147,8 @@ static void check_async_req_result(struct async_req *req)
 
 	pthread_join(req->tid, NULL);
 	ck_assert_int_eq(req->req_valid, true);
-	ck_assert_int_eq(req->actual.lease_index, req->expected.lease_index);
-	ck_assert_int_eq(req->actual.type, req->expected.type);
+	check_request(&req->actual, req->expected.lease_handle,
+		      req->expected.type);
 	free(req);
 }
 
@@ -154,9 +165,9 @@ START_TEST(issue_lease_request_and_release)
 
 	struct client_state *cstate = test_client_start(&default_test_config);
 
-	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_GET_LEASE);
 	test_client_stop(cstate);
-	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 }
 END_TEST
 
@@ -174,8 +185,8 @@ START_TEST(issue_lease_request_and_early_release)
 	struct client_state *cstate = test_client_start(&default_test_config);
 
 	test_client_stop(cstate);
-	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
-	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_GET_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 }
 END_TEST
 
@@ -190,14 +201,17 @@ END_TEST
  */
 START_TEST(issue_multiple_lease_requests)
 {
-	struct ls *ls = ls_create((uint32_t[]){TEST_LEASE_ID}, 1);
+	struct lease_handle *leases[] = {
+	    &test_lease,
+	};
+	struct ls *ls = ls_create(leases, 1);
 
 	struct test_config accepted_config;
 	struct client_state *accepted_cstate;
 
 	accepted_config = default_test_config;
 	accepted_cstate = test_client_start(&accepted_config);
-	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_GET_LEASE);
 
 	/*Try to make additional connections while the first is still
 	 *connected. */
@@ -212,7 +226,7 @@ START_TEST(issue_multiple_lease_requests)
 
 	// Start asyncronously checking for the accepted client to release.
 	struct async_req *async_release_req =
-	    get_and_check_request_async(ls, 0, LS_REQ_RELEASE_LEASE);
+	    get_and_check_request_async(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 
 	for (int i = 0; i < nextra_clients; i++) {
 		test_client_stop(extra_cstates[i]);
@@ -258,14 +272,17 @@ START_TEST(send_fd_to_client)
 
 	struct client_state *cstate = test_client_start(&default_test_config);
 
-	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	struct ls_req req;
+	bool req_valid = ls_get_request(ls, &req);
+	ck_assert_int_eq(req_valid, true);
+	check_request(&req, &test_lease, LS_REQ_GET_LEASE);
 
 	/* send an fd to the client*/
 	int test_fd = get_dummy_fd();
-	ck_assert_int_eq(ls_send_fd(ls, 0, test_fd), true);
+	ck_assert_int_eq(ls_send_fd(ls, req.server, test_fd), true);
 
 	test_client_stop(cstate);
-	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 
 	ck_assert_int_eq(default_test_config.connection_completed, true);
 	ck_assert_int_eq(default_test_config.has_data, true);
@@ -285,15 +302,18 @@ START_TEST(ls_send_fd_is_noop_when_fd_is_invalid)
 
 	struct client_state *cstate = test_client_start(&default_test_config);
 
-	get_and_check_request(ls, 0, LS_REQ_GET_LEASE);
+	struct ls_req req;
+	bool req_valid = ls_get_request(ls, &req);
+	ck_assert_int_eq(req_valid, true);
+	check_request(&req, &test_lease, LS_REQ_GET_LEASE);
 
 	int invalid_fd = get_dummy_fd();
 	close(invalid_fd);
 
-	ck_assert_int_eq(ls_send_fd(ls, 0, invalid_fd), false);
+	ck_assert_int_eq(ls_send_fd(ls, req.server, invalid_fd), false);
 
 	test_client_stop(cstate);
-	get_and_check_request(ls, 0, LS_REQ_RELEASE_LEASE);
+	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 	ck_assert_int_eq(default_test_config.connection_completed, true);
 	ck_assert_int_eq(default_test_config.has_data, false);
 }

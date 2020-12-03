@@ -60,7 +60,7 @@ static void *test_server_thread(void *arg)
 	};
 
 	ck_assert_int_eq(
-	    sockaddr_set_lease_server_path(&address, config->lease_id), true);
+	    sockaddr_set_lease_server_path(&address, config->lease_name), true);
 
 	int server = socket(PF_UNIX, SOCK_STREAM, 0);
 	ck_assert_int_ge(server, 0);

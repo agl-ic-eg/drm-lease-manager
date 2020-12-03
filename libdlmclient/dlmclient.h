@@ -9,7 +9,6 @@ extern "C" {
 #endif
 
 #include <stdbool.h>
-#include <stdint.h>
 
 /*
  * @brief Enable debug logging
@@ -42,7 +41,7 @@ struct dlm_lease;
  *  This list is not exhaustive, and errno may be set to other error codes,
  *  especially those related to socket communication.
  */
-struct dlm_lease *dlm_get_lease(uint32_t id);
+struct dlm_lease *dlm_get_lease(char *name);
 
 /**
  * @brief  Release a lease handle

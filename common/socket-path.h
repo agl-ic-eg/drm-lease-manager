@@ -6,6 +6,6 @@
 #include <sys/un.h>
 
 bool sockaddr_set_lease_server_path(struct sockaddr_un *dest,
-				    uint32_t lease_id);
+				    const char *lease_name);
 
 #endif

@@ -13,7 +13,7 @@
 
 #define SOCKETDIR "/tmp"
 
-#define TEST_LEASE_ID 5
+#define TEST_LEASE_NAME "test-lease"
 
 /**************  Test fixutre functions *************/
 struct test_config default_test_config;
@@ -24,7 +24,7 @@ static void test_setup(void)
 	setenv("DLM_SOCKET_PATH", SOCKETDIR, 1);
 
 	default_test_config = (struct test_config){
-	    .lease_id = TEST_LEASE_ID,
+	    .lease_name = TEST_LEASE_NAME,
 	    .nfds = 1,
 	};
 }
@@ -51,7 +51,7 @@ START_TEST(manager_connection_err)
 {
 	struct server_state *sstate = test_server_start(&default_test_config);
 
-	struct dlm_lease *lease = dlm_get_lease(~TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME "-bad");
 
 	ck_assert_ptr_eq(lease, NULL);
 
@@ -74,13 +74,13 @@ START_TEST(no_data_from_manager)
 {
 
 	struct test_config config = {
-	    .lease_id = TEST_LEASE_ID,
+	    .lease_name = TEST_LEASE_NAME,
 	    .send_no_data = true,
 	};
 
 	struct server_state *sstate = test_server_start(&config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 
 	ck_assert_ptr_eq(lease, NULL);
 	ck_assert_int_eq(errno, EACCES);
@@ -100,13 +100,13 @@ START_TEST(no_lease_fd_from_manager)
 {
 	/* Receive message from the lease manager with missing lease fd */
 	struct test_config config = {
-	    .lease_id = TEST_LEASE_ID,
+	    .lease_name = TEST_LEASE_NAME,
 	    .send_data_without_fd = true,
 	};
 
 	struct server_state *sstate = test_server_start(&config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 
 	ck_assert_ptr_eq(lease, NULL);
 	ck_assert_int_eq(errno, EPROTO);
@@ -156,7 +156,7 @@ START_TEST(receive_fd_from_manager)
 {
 	struct server_state *sstate = test_server_start(&default_test_config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 	ck_assert_ptr_ne(lease, NULL);
 
 	int received_fd = dlm_lease_fd(lease);
@@ -181,7 +181,7 @@ START_TEST(lease_fd_is_closed_on_release)
 {
 	struct server_state *sstate = test_server_start(&default_test_config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 	ck_assert_ptr_ne(lease, NULL);
 
 	int received_fd = dlm_lease_fd(lease);
@@ -204,7 +204,7 @@ START_TEST(dlm_lease_fd_always_returns_same_lease)
 {
 	struct server_state *sstate = test_server_start(&default_test_config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 	ck_assert_ptr_ne(lease, NULL);
 
 	int received_fd = dlm_lease_fd(lease);
@@ -223,13 +223,13 @@ START_TEST(verify_that_unused_fds_are_not_leaked)
 	int nopen_fds = count_open_fds();
 
 	struct test_config config = {
-	    .lease_id = TEST_LEASE_ID,
+	    .lease_name = TEST_LEASE_NAME,
 	    .nfds = 2,
 	};
 
 	struct server_state *sstate = test_server_start(&config);
 
-	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_ID);
+	struct dlm_lease *lease = dlm_get_lease(TEST_LEASE_NAME);
 
 	ck_assert_ptr_eq(lease, NULL);
 	ck_assert_int_eq(errno, EPROTO);

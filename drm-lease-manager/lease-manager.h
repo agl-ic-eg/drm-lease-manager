@@ -1,15 +1,14 @@
 #ifndef LEASE_MANAGER_H
 #define LEASE_MANAGER_H
-#include <stddef.h>
-#include <stdint.h>
+#include "drm-lease.h"
 
 struct lm;
 
 struct lm *lm_create(const char *path);
 void lm_destroy(struct lm *lm);
 
-int lm_get_lease_ids(struct lm *lm, uint32_t **ids);
+int lm_get_lease_handles(struct lm *lm, struct lease_handle ***lease_handles);
 
-int lm_lease_grant(struct lm *lm, int index);
-void lm_lease_revoke(struct lm *lm, int index);
+int lm_lease_grant(struct lm *lm, struct lease_handle *lease_handle);
+void lm_lease_revoke(struct lm *lm, struct lease_handle *lease_handle);
 #endif

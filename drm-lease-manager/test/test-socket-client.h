@@ -1,11 +1,11 @@
 #ifndef TEST_SOCKET_CLIENT_H
 #define TEST_SOCKET_CLIENT_H
 #include <stdbool.h>
-#include <stdint.h>
 
+#include "drm-lease.h"
 struct test_config {
 	// settings
-	uint32_t lease_id;
+	struct lease_handle *lease;
 	int recv_timeout;
 
 	// outputs

@@ -1,6 +1,7 @@
 #include "dlmclient.h"
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,13 +52,12 @@ static void dumpDRMResources(int lease_fd)
 
 int main(int argc, char **argv)
 {
-	const int id = (argc < 2) ? -1 : atoi(argv[1]);
-	if (id < 0) {
+	if (argc < 2) {
 		usage(argv[0]);
 		return EXIT_FAILURE;
 	}
 
-	struct dlm_lease *lease = dlm_get_lease((uint32_t)id);
+	struct dlm_lease *lease = dlm_get_lease(argv[1]);
 	if (!lease) {
 		fprintf(stderr, "dlm_get_lease: %s\n", strerror(errno));
 		return EXIT_FAILURE;

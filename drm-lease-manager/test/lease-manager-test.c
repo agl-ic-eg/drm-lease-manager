@@ -16,9 +16,9 @@
  * Asks the lease manager to create the lease, and checks that
  * the requested objects are the ones given in the supplied list. */
 
-#define CHECK_LEASE_OBJECTS(lease_index, ...)                               \
+#define CHECK_LEASE_OBJECTS(lease, ...)                                     \
 	do {                                                                \
-		lm_lease_grant(lm, lease_index);                            \
+		lm_lease_grant(lm, lease);                                  \
 		uint32_t objs[] = {__VA_ARGS__};                            \
 		int nobjs = ARRAY_LEN(objs);                                \
 		ck_assert_int_eq(drmModeCreateLease_fake.arg2_val, nobjs);  \
@@ -117,12 +117,12 @@ START_TEST(all_outputs_connected)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	uint32_t *ids;
-	ck_assert_int_eq(out_cnt, lm_get_lease_ids(lm, &ids));
-	ck_assert_ptr_ne(ids, NULL);
+	struct lease_handle **handles;
+	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
 
-	CHECK_LEASE_OBJECTS(0, CRTC_ID(0), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, CRTC_ID(1), CONNECTOR_ID(1));
+	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(0), CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(1), CONNECTOR_ID(1));
 
 	lm_destroy(lm);
 }
@@ -158,16 +158,16 @@ START_TEST(no_outputs_connected)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	uint32_t *ids;
-	ck_assert_int_eq(out_cnt, lm_get_lease_ids(lm, &ids));
-	ck_assert_ptr_ne(ids, NULL);
+	struct lease_handle **handles;
+	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
 
 	// FIXME: This will currently fail if lease manager has to choose a free
 	//      CRTC out of multiple possibilites.  (currently the first
 	//      possible CRTC is selected, even if it is in use).
 
-	CHECK_LEASE_OBJECTS(0, CRTC_ID(1), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, CRTC_ID(0), CONNECTOR_ID(1));
+	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(1), CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(0), CONNECTOR_ID(1));
 
 	lm_destroy(lm);
 }
@@ -202,16 +202,16 @@ START_TEST(some_outputs_connected)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	uint32_t *ids;
-	ck_assert_int_eq(out_cnt, lm_get_lease_ids(lm, &ids));
-	ck_assert_ptr_ne(ids, NULL);
+	struct lease_handle **handles;
+	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
 
 	// FIXME: This will currently fail if lease manager has to choose a free
 	//      CRTC out of multiple possibilites.  (currently the first
 	//      possible CRTC is selected, even if it is in use).
 
-	CHECK_LEASE_OBJECTS(0, CRTC_ID(0), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, CRTC_ID(1), CONNECTOR_ID(1));
+	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(0), CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(1), CONNECTOR_ID(1));
 
 	lm_destroy(lm);
 }
@@ -247,12 +247,12 @@ START_TEST(fewer_crtcs_than_connectors)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	uint32_t *ids;
-	ck_assert_int_eq(lm_get_lease_ids(lm, &ids), crtc_cnt);
-	ck_assert_ptr_ne(ids, NULL);
+	struct lease_handle **handles;
+	ck_assert_int_eq(lm_get_lease_handles(lm, &handles), crtc_cnt);
+	ck_assert_ptr_ne(handles, NULL);
 
-	CHECK_LEASE_OBJECTS(0, CRTC_ID(0), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, CRTC_ID(1), CONNECTOR_ID(2));
+	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(0), CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(1), CONNECTOR_ID(2));
 	lm_destroy(lm);
 }
 END_TEST
@@ -292,8 +292,13 @@ START_TEST(separate_overlay_planes_by_crtc)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	CHECK_LEASE_OBJECTS(0, PLANE_ID(1), CRTC_ID(0), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, PLANE_ID(0), PLANE_ID(2), CRTC_ID(1),
+	struct lease_handle **handles;
+	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
+
+	CHECK_LEASE_OBJECTS(handles[0], PLANE_ID(1), CRTC_ID(0),
+			    CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], PLANE_ID(0), PLANE_ID(2), CRTC_ID(1),
 			    CONNECTOR_ID(1));
 	lm_destroy(lm);
 }
@@ -335,8 +340,14 @@ START_TEST(reject_planes_shared_between_multiple_crtcs)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
-	CHECK_LEASE_OBJECTS(0, PLANE_ID(1), CRTC_ID(0), CONNECTOR_ID(0));
-	CHECK_LEASE_OBJECTS(1, PLANE_ID(0), CRTC_ID(1), CONNECTOR_ID(1));
+	struct lease_handle **handles;
+	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
+
+	CHECK_LEASE_OBJECTS(handles[0], PLANE_ID(1), CRTC_ID(0),
+			    CONNECTOR_ID(0));
+	CHECK_LEASE_OBJECTS(handles[1], PLANE_ID(0), CRTC_ID(1),
+			    CONNECTOR_ID(1));
 	lm_destroy(lm);
 }
 END_TEST
@@ -383,9 +394,13 @@ START_TEST(create_and_revoke_lease)
 	struct lm *lm = lm_create(TEST_DRM_DEVICE);
 	ck_assert_ptr_ne(lm, NULL);
 
+	struct lease_handle **handles;
+	ck_assert_int_eq(lease_cnt, lm_get_lease_handles(lm, &handles));
+	ck_assert_ptr_ne(handles, NULL);
+
 	for (int i = 0; i < lease_cnt; i++) {
-		ck_assert_int_ge(lm_lease_grant(lm, i), 0);
-		lm_lease_revoke(lm, i);
+		ck_assert_int_ge(lm_lease_grant(lm, handles[i]), 0);
+		lm_lease_revoke(lm, handles[i]);
 	}
 
 	ck_assert_int_eq(drmModeRevokeLease_fake.call_count, lease_cnt);

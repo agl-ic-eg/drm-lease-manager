@@ -56,11 +56,11 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	uint32_t *ids = NULL;
-	int count_ids = lm_get_lease_ids(lm, &ids);
+	struct lease_handle **lease_handles = NULL;
+	int count_ids = lm_get_lease_handles(lm, &lease_handles);
 	assert(count_ids > 0);
 
-	struct ls *ls = ls_create(ids, count_ids);
+	struct ls *ls = ls_create(lease_handles, count_ids);
 	if (!ls) {
 		lm_destroy(lm);
 		ERROR_LOG("Client socket initialization failed\n");
@@ -71,26 +71,27 @@ int main(int argc, char **argv)
 	while (ls_get_request(ls, &req)) {
 		switch (req.type) {
 		case LS_REQ_GET_LEASE: {
-			int index = req.lease_index;
-			int fd = lm_lease_grant(lm, index);
+			int fd = lm_lease_grant(lm, req.lease_handle);
 			if (fd < 0) {
-				// TODO: Add the lease name to the error log
-				ERROR_LOG("Can't fulfill lease request.\n");
-				ls_disconnect_client(ls, index);
+				ERROR_LOG(
+				    "Can't fulfill lease request: lease=%s\n",
+				    req.lease_handle->name);
+				ls_disconnect_client(ls, req.server);
 				break;
 			}
 
-			if (!ls_send_fd(ls, index, fd)) {
-				// TODO: Add the lease name to the error log
-				ERROR_LOG("Client communication error.\n");
-				ls_disconnect_client(ls, index);
-				lm_lease_revoke(lm, index);
+			if (!ls_send_fd(ls, req.server, fd)) {
+				ERROR_LOG(
+				    "Client communication error: lease=%s\n",
+				    req.lease_handle->name);
+				ls_disconnect_client(ls, req.server);
+				lm_lease_revoke(lm, req.lease_handle);
 			}
 			break;
 		}
 		case LS_REQ_RELEASE_LEASE:
-			ls_disconnect_client(ls, req.lease_index);
-			lm_lease_revoke(lm, req.lease_index);
+			ls_disconnect_client(ls, req.server);
+			lm_lease_revoke(lm, req.lease_handle);
 			break;
 		default:
 			ERROR_LOG("Internal error: Invalid lease request\n");

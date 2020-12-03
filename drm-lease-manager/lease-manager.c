@@ -1,4 +1,7 @@
+#define _GNU_SOURCE
 #include "lease-manager.h"
+
+#include "drm-lease.h"
 #include "log.h"
 
 #include <assert.h>
@@ -17,6 +20,8 @@
 #define DRM_LEASE_MIN_RES (2)
 
 struct lease {
+	struct lease_handle base;
+
 	bool is_granted;
 	uint32_t lessee_id;
 	int lease_fd;
@@ -30,10 +35,18 @@ struct lm {
 	drmModeResPtr drm_resource;
 	drmModePlaneResPtr drm_plane_resource;
 
-	uint32_t *lease_ids;
 	struct lease **leases;
 	int nleases;
 };
+
+static char *drm_create_lease_name(uint32_t connector_id)
+{
+	char *name;
+	if (asprintf(&name, "dlm_connector-%u", connector_id) < 0)
+		return NULL;
+
+	return name;
+}
 
 static int drm_get_active_crtc_index(struct lm *lm,
 				     drmModeConnectorPtr connector)
@@ -102,6 +115,7 @@ static bool lease_add_planes(struct lm *lm, struct lease *lease, int crtc_index)
 
 static void lease_free(struct lease *lease)
 {
+	free(lease->base.name);
 	free(lease->object_ids);
 	free(lease);
 }
@@ -112,6 +126,13 @@ static struct lease *lease_create(struct lm *lm, uint32_t connector_id)
 	if (!lease) {
 		DEBUG_LOG("Memory allocation failed: %s\n", strerror(errno));
 		return NULL;
+	}
+	lease->base.name = drm_create_lease_name(connector_id);
+
+	if (!lease->base.name) {
+		DEBUG_LOG("Lease name generation failed: %s\n",
+			  strerror(errno));
+		goto err;
 	}
 
 	int nobjects = lm->drm_plane_resource->count_planes + DRM_LEASE_MIN_RES;
@@ -171,7 +192,6 @@ struct lm *lm_create(const char *device)
 		goto err;
 	}
 
-	lm->lease_ids = lm->drm_resource->connectors;
 	int num_leases = lm->drm_resource->count_connectors;
 
 	lm->leases = calloc(num_leases, sizeof(struct lease *));
@@ -203,7 +223,7 @@ void lm_destroy(struct lm *lm)
 	assert(lm);
 
 	for (int i = 0; i < lm->nleases; i++) {
-		lm_lease_revoke(lm, i);
+		lm_lease_revoke(lm, (struct lease_handle *)lm->leases[i]);
 		lease_free(lm->leases[i]);
 	}
 
@@ -214,21 +234,21 @@ void lm_destroy(struct lm *lm)
 	free(lm);
 }
 
-int lm_get_lease_ids(struct lm *lm, uint32_t **ids)
+int lm_get_lease_handles(struct lm *lm, struct lease_handle ***handles)
 {
 	assert(lm);
-	assert(ids);
+	assert(handles);
 
-	*ids = lm->lease_ids;
+	*handles = (struct lease_handle **)lm->leases;
 	return lm->nleases;
 }
 
-int lm_lease_grant(struct lm *lm, int index)
+int lm_lease_grant(struct lm *lm, struct lease_handle *handle)
 {
 	assert(lm);
-	assert(index > -1 && index < lm->nleases);
+	assert(handle);
 
-	struct lease *lease = lm->leases[index];
+	struct lease *lease = (struct lease *)handle;
 	if (lease->is_granted)
 		return lease->lease_fd;
 
@@ -236,8 +256,8 @@ int lm_lease_grant(struct lm *lm, int index)
 	    drmModeCreateLease(lm->drm_fd, lease->object_ids,
 			       lease->nobject_ids, 0, &lease->lessee_id);
 	if (lease->lease_fd < 0) {
-		ERROR_LOG("drmModeCreateLease failed on lease %u: %s\n",
-			  lm->lease_ids[index], strerror(errno));
+		ERROR_LOG("drmModeCreateLease failed on lease %s: %s\n",
+			  lease->base.name, strerror(errno));
 		return -1;
 	}
 
@@ -245,12 +265,13 @@ int lm_lease_grant(struct lm *lm, int index)
 	return lease->lease_fd;
 }
 
-void lm_lease_revoke(struct lm *lm, int index)
+void lm_lease_revoke(struct lm *lm, struct lease_handle *handle)
 {
 	assert(lm);
-	assert(index > -1 && index < lm->nleases);
+	assert(handle);
 
-	struct lease *lease = lm->leases[index];
+	struct lease *lease = (struct lease *)handle;
+
 	if (!lease->is_granted)
 		return;
 

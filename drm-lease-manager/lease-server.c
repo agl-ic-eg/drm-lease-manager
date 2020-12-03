@@ -19,7 +19,7 @@ struct ls_socket {
 };
 
 struct ls_server {
-	int index;
+	struct lease_handle *lease_handle;
 	struct sockaddr_un address;
 
 	struct ls_socket listen;
@@ -68,22 +68,12 @@ static bool client_connect(struct ls *ls, struct ls_server *serv)
 	return true;
 }
 
-static void client_disconnect(const struct ls *ls, struct ls_server *serv)
-{
-	if (!serv->is_client_connected)
-		return;
-
-	epoll_ctl(ls->epoll_fd, EPOLL_CTL_DEL, serv->client.fd, NULL);
-	close(serv->client.fd);
-	serv->is_client_connected = false;
-}
-
-static bool server_setup(const struct ls *ls, struct ls_server *serv,
-			 uint32_t lease_id)
+static bool server_setup(struct ls *ls, struct ls_server *serv,
+			 struct lease_handle *lease_handle)
 {
 	struct sockaddr_un *address = &serv->address;
 
-	if (!sockaddr_set_lease_server_path(address, lease_id))
+	if (!sockaddr_set_lease_server_path(address, lease_handle->name))
 		return false;
 
 	address->sun_family = AF_UNIX;
@@ -110,6 +100,7 @@ static bool server_setup(const struct ls *ls, struct ls_server *serv,
 	}
 
 	serv->is_client_connected = false;
+	serv->lease_handle = lease_handle;
 	serv->listen.fd = server_socket;
 	serv->listen.serv = serv;
 
@@ -125,12 +116,12 @@ static bool server_setup(const struct ls *ls, struct ls_server *serv,
 		return false;
 	}
 
-	INFO_LOG("Lease server (id = %d) initialized at %s\n", lease_id,
+	INFO_LOG("Lease server (%s) initialized at %s\n", lease_handle->name,
 		 address->sun_path);
 	return true;
 }
 
-static void server_shutdown(const struct ls *ls, struct ls_server *serv)
+static void server_shutdown(struct ls *ls, struct ls_server *serv)
 {
 	if (unlink(serv->address.sun_path)) {
 		WARN_LOG("Server socket %s delete failed: %s\n",
@@ -139,12 +130,12 @@ static void server_shutdown(const struct ls *ls, struct ls_server *serv)
 
 	epoll_ctl(ls->epoll_fd, EPOLL_CTL_DEL, serv->listen.fd, NULL);
 	close(serv->listen.fd);
-	client_disconnect(ls, serv);
+	ls_disconnect_client(ls, serv);
 }
 
-struct ls *ls_create(uint32_t *ids, int count)
+struct ls *ls_create(struct lease_handle **lease_handles, int count)
 {
-	assert(ids);
+	assert(lease_handles);
 	assert(count > 0);
 
 	struct ls *ls = calloc(1, sizeof(struct ls));
@@ -166,8 +157,7 @@ struct ls *ls_create(uint32_t *ids, int count)
 	}
 
 	for (int i = 0; i < count; i++) {
-		ls->servers[i].index = i;
-		if (!server_setup(ls, &ls->servers[i], ids[i]))
+		if (!server_setup(ls, &ls->servers[i], lease_handles[i]))
 			goto err;
 		ls->nservers++;
 	}
@@ -208,7 +198,8 @@ bool ls_get_request(struct ls *ls, struct ls_req *req)
 		assert(sock);
 
 		struct ls_server *server = sock->serv;
-		req->lease_index = server->index;
+		req->lease_handle = server->lease_handle;
+		req->server = server;
 
 		if (sock == &server->listen) {
 			if (!(ev.events & POLLIN))
@@ -228,15 +219,13 @@ bool ls_get_request(struct ls *ls, struct ls_req *req)
 	return true;
 }
 
-bool ls_send_fd(struct ls *ls, int lease_index, int fd)
+bool ls_send_fd(struct ls *ls, struct ls_server *serv, int fd)
 {
 	assert(ls);
-	assert(lease_index >= 0 && lease_index < ls->nservers);
+	assert(serv);
 
 	if (fd < 0)
 		return false;
-
-	struct ls_server *serv = &ls->servers[lease_index];
 
 	char data[1];
 	struct iovec iov = {
@@ -269,11 +258,14 @@ bool ls_send_fd(struct ls *ls, int lease_index, int fd)
 	return true;
 }
 
-void ls_disconnect_client(struct ls *ls, int lease_index)
+void ls_disconnect_client(struct ls *ls, struct ls_server *serv)
 {
 	assert(ls);
-	assert(lease_index >= 0 && lease_index < ls->nservers);
+	assert(serv);
+	if (!serv->is_client_connected)
+		return;
 
-	struct ls_server *serv = &ls->servers[lease_index];
-	client_disconnect(ls, serv);
+	epoll_ctl(ls->epoll_fd, EPOLL_CTL_DEL, serv->client.fd, NULL);
+	close(serv->client.fd);
+	serv->is_client_connected = false;
 }
