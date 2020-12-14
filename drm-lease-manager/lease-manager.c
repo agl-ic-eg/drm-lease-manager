@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -18,6 +20,8 @@
 /* Number of resources, excluding planes, to be included in each DRM lease.
  * Each lease needs at least a CRTC and conector. */
 #define DRM_LEASE_MIN_RES (2)
+
+#define ARRAY_LENGTH(x) (sizeof(x) / sizeof(x[0]))
 
 struct lease {
 	struct lease_handle base;
@@ -32,6 +36,8 @@ struct lease {
 
 struct lm {
 	int drm_fd;
+	dev_t dev_id;
+
 	drmModeResPtr drm_resource;
 	drmModePlaneResPtr drm_plane_resource;
 
@@ -39,10 +45,44 @@ struct lm {
 	int nleases;
 };
 
-static char *drm_create_lease_name(uint32_t connector_id)
+static const char *const connector_type_names[] = {
+    [DRM_MODE_CONNECTOR_Unknown] = "Unknown",
+    [DRM_MODE_CONNECTOR_VGA] = "VGA",
+    [DRM_MODE_CONNECTOR_DVII] = "DVI-I",
+    [DRM_MODE_CONNECTOR_DVID] = "DVI-D",
+    [DRM_MODE_CONNECTOR_DVIA] = "DVI-A",
+    [DRM_MODE_CONNECTOR_Composite] = "Composite",
+    [DRM_MODE_CONNECTOR_SVIDEO] = "SVIDEO",
+    [DRM_MODE_CONNECTOR_LVDS] = "LVDS",
+    [DRM_MODE_CONNECTOR_Component] = "Component",
+    [DRM_MODE_CONNECTOR_9PinDIN] = "DIN",
+    [DRM_MODE_CONNECTOR_DisplayPort] = "DP",
+    [DRM_MODE_CONNECTOR_HDMIA] = "HDMI-A",
+    [DRM_MODE_CONNECTOR_HDMIB] = "HDMI-B",
+    [DRM_MODE_CONNECTOR_TV] = "TV",
+    [DRM_MODE_CONNECTOR_eDP] = "eDP",
+    [DRM_MODE_CONNECTOR_VIRTUAL] = "Virtual",
+    [DRM_MODE_CONNECTOR_DSI] = "DSI",
+    [DRM_MODE_CONNECTOR_DPI] = "DPI",
+    [DRM_MODE_CONNECTOR_WRITEBACK] = "Writeback",
+};
+
+static char *drm_create_lease_name(struct lm *lm, drmModeConnectorPtr connector)
 {
+	uint32_t type = connector->connector_type;
+	uint32_t id = connector->connector_type_id;
+
+	if (type >= ARRAY_LENGTH(connector_type_names))
+		type = DRM_MODE_CONNECTOR_Unknown;
+
+	/* If the type is "Unknown", use the connector_id as the identify to
+	 * guarantee that the name will be unique. */
+	if (type == DRM_MODE_CONNECTOR_Unknown)
+		id = connector->connector_id;
+
 	char *name;
-	if (asprintf(&name, "dlm_connector-%u", connector_id) < 0)
+	if (asprintf(&name, "card%d-%s-%d", minor(lm->dev_id),
+		     connector_type_names[type], id) < 0)
 		return NULL;
 
 	return name;
@@ -65,17 +105,13 @@ static int drm_get_active_crtc_index(struct lm *lm,
 	return -1;
 }
 
-static int drm_get_crtc_index(struct lm *lm, uint32_t connector_id)
+static int drm_get_crtc_index(struct lm *lm, drmModeConnectorPtr connector)
 {
-	drmModeConnectorPtr connector =
-	    drmModeGetConnector(lm->drm_fd, connector_id);
-	if (!connector)
-		return -1;
 
 	// try the active CRTC first
 	int crtc_index = drm_get_active_crtc_index(lm, connector);
 	if (crtc_index != -1)
-		goto found;
+		return crtc_index;
 
 	// If not try the first available CRTC on the connector/encoder
 	for (int i = 0; i < connector->count_encoders; i++) {
@@ -91,8 +127,6 @@ static int drm_get_crtc_index(struct lm *lm, uint32_t connector_id)
 		crtc_index = crtc - 1;
 		break;
 	}
-found:
-	drmModeFreeConnector(connector);
 	return crtc_index;
 }
 
@@ -120,18 +154,17 @@ static void lease_free(struct lease *lease)
 	free(lease);
 }
 
-static struct lease *lease_create(struct lm *lm, uint32_t connector_id)
+static struct lease *lease_create(struct lm *lm, drmModeConnectorPtr connector)
 {
 	struct lease *lease = calloc(1, sizeof(struct lease));
 	if (!lease) {
 		DEBUG_LOG("Memory allocation failed: %s\n", strerror(errno));
 		return NULL;
 	}
-	lease->base.name = drm_create_lease_name(connector_id);
 
+	lease->base.name = drm_create_lease_name(lm, connector);
 	if (!lease->base.name) {
-		DEBUG_LOG("Lease name generation failed: %s\n",
-			  strerror(errno));
+		DEBUG_LOG("Can't create lease name: %s\n", strerror(errno));
 		goto err;
 	}
 
@@ -142,9 +175,10 @@ static struct lease *lease_create(struct lm *lm, uint32_t connector_id)
 		goto err;
 	}
 
-	int crtc_index = drm_get_crtc_index(lm, connector_id);
+	int crtc_index = drm_get_crtc_index(lm, connector);
 	if (crtc_index < 0) {
-		DEBUG_LOG("No crtc found for connector %u\n", connector_id);
+		DEBUG_LOG("No crtc found for connector: %s\n",
+			  lease->base.name);
 		goto err;
 	}
 
@@ -153,7 +187,7 @@ static struct lease *lease_create(struct lm *lm, uint32_t connector_id)
 
 	uint32_t crtc_id = lm->drm_resource->crtcs[crtc_index];
 	lease->object_ids[lease->nobject_ids++] = crtc_id;
-	lease->object_ids[lease->nobject_ids++] = connector_id;
+	lease->object_ids[lease->nobject_ids++] = connector->connector_id;
 
 	lease->is_granted = false;
 
@@ -192,6 +226,14 @@ struct lm *lm_create(const char *device)
 		goto err;
 	}
 
+	struct stat st;
+	if (fstat(lm->drm_fd, &st) < 0 || !S_ISCHR(st.st_mode)) {
+		DEBUG_LOG("%s is not a valid device file\n", device);
+		goto err;
+	}
+
+	lm->dev_id = st.st_rdev;
+
 	int num_leases = lm->drm_resource->count_connectors;
 
 	lm->leases = calloc(num_leases, sizeof(struct lease *));
@@ -202,7 +244,15 @@ struct lm *lm_create(const char *device)
 
 	for (int i = 0; i < num_leases; i++) {
 		uint32_t connector_id = lm->drm_resource->connectors[i];
-		struct lease *lease = lease_create(lm, connector_id);
+		drmModeConnectorPtr connector =
+		    drmModeGetConnector(lm->drm_fd, connector_id);
+
+		if (!connector)
+			continue;
+
+		struct lease *lease = lease_create(lm, connector);
+		drmModeFreeConnector(connector);
+
 		if (!lease) {
 			ERROR_LOG("Failed to initialize lease (id=%d)\n",
 				  connector_id);
