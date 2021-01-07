@@ -162,10 +162,6 @@ START_TEST(no_outputs_connected)
 	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
 	ck_assert_ptr_ne(handles, NULL);
 
-	// FIXME: This will currently fail if lease manager has to choose a free
-	//      CRTC out of multiple possibilites.  (currently the first
-	//      possible CRTC is selected, even if it is in use).
-
 	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(1), CONNECTOR_ID(0));
 	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(0), CONNECTOR_ID(1));
 
@@ -205,10 +201,6 @@ START_TEST(some_outputs_connected)
 	struct lease_handle **handles;
 	ck_assert_int_eq(out_cnt, lm_get_lease_handles(lm, &handles));
 	ck_assert_ptr_ne(handles, NULL);
-
-	// FIXME: This will currently fail if lease manager has to choose a free
-	//      CRTC out of multiple possibilites.  (currently the first
-	//      possible CRTC is selected, even if it is in use).
 
 	CHECK_LEASE_OBJECTS(handles[0], CRTC_ID(0), CONNECTOR_ID(0));
 	CHECK_LEASE_OBJECTS(handles[1], CRTC_ID(1), CONNECTOR_ID(1));

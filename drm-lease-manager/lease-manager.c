@@ -40,6 +40,7 @@ struct lm {
 
 	drmModeResPtr drm_resource;
 	drmModePlaneResPtr drm_plane_resource;
+	uint32_t available_crtcs;
 
 	struct lease **leases;
 	int nleases;
@@ -88,6 +89,23 @@ static char *drm_create_lease_name(struct lm *lm, drmModeConnectorPtr connector)
 	return name;
 }
 
+static int drm_get_encoder_crtc_index(struct lm *lm, drmModeEncoderPtr encoder)
+{
+	uint32_t crtc_id = encoder->crtc_id;
+	if (!crtc_id)
+		return -1;
+
+	// The CRTC index only makes sense if it is less than the number of
+	// bits in the encoder possible_crtcs bitmap, which is 32.
+	assert(lm->drm_resource->count_crtcs < 32);
+
+	for (int i = 0; i < lm->drm_resource->count_crtcs; i++) {
+		if (lm->drm_resource->crtcs[i] == crtc_id)
+			return i;
+	}
+	return -1;
+}
+
 static int drm_get_active_crtc_index(struct lm *lm,
 				     drmModeConnectorPtr connector)
 {
@@ -96,13 +114,9 @@ static int drm_get_active_crtc_index(struct lm *lm,
 	if (!encoder)
 		return -1;
 
-	uint32_t crtc_id = encoder->crtc_id;
+	int crtc_idx = drm_get_encoder_crtc_index(lm, encoder);
 	drmModeFreeEncoder(encoder);
-	for (int i = 0; i < lm->drm_resource->count_crtcs; i++) {
-		if (lm->drm_resource->crtcs[i] == crtc_id)
-			return i;
-	}
-	return -1;
+	return crtc_idx;
 }
 
 static int drm_get_crtc_index(struct lm *lm, drmModeConnectorPtr connector)
@@ -120,14 +134,37 @@ static int drm_get_crtc_index(struct lm *lm, drmModeConnectorPtr connector)
 
 		assert(encoder);
 
-		int crtc = ffs(encoder->possible_crtcs);
+		uint32_t usable_crtcs =
+		    lm->available_crtcs & encoder->possible_crtcs;
+		int crtc = ffs(usable_crtcs);
 		drmModeFreeEncoder(encoder);
 		if (crtc == 0)
 			continue;
 		crtc_index = crtc - 1;
+		lm->available_crtcs &= ~(1 << crtc_index);
 		break;
 	}
 	return crtc_index;
+}
+
+static void drm_find_available_crtcs(struct lm *lm)
+{
+	// Assume all CRTCS are available by default,
+	lm->available_crtcs = ~0;
+
+	// then remove any that are in use. */
+	for (int i = 0; i < lm->drm_resource->count_encoders; i++) {
+		int enc_id = lm->drm_resource->encoders[i];
+		drmModeEncoderPtr enc = drmModeGetEncoder(lm->drm_fd, enc_id);
+		if (!enc)
+			continue;
+
+		int crtc_idx = drm_get_encoder_crtc_index(lm, enc);
+		if (crtc_idx >= 0)
+			lm->available_crtcs &= ~(1 << crtc_idx);
+
+		drmModeFreeEncoder(enc);
+	}
 }
 
 static bool lease_add_planes(struct lm *lm, struct lease *lease, int crtc_index)
@@ -242,6 +279,8 @@ struct lm *lm_create(const char *device)
 		goto err;
 	}
 
+	drm_find_available_crtcs(lm);
+
 	for (int i = 0; i < num_leases; i++) {
 		uint32_t connector_id = lm->drm_resource->connectors[i];
 		drmModeConnectorPtr connector =
@@ -253,14 +292,15 @@ struct lm *lm_create(const char *device)
 		struct lease *lease = lease_create(lm, connector);
 		drmModeFreeConnector(connector);
 
-		if (!lease) {
-			ERROR_LOG("Failed to initialize lease (id=%d)\n",
-				  connector_id);
-			goto err;
-		}
-		lm->leases[i] = lease;
+		if (!lease)
+			continue;
+
+		lm->leases[lm->nleases] = lease;
 		lm->nleases++;
 	}
+	if (lm->nleases == 0)
+		goto err;
+
 	return lm;
 
 err:
