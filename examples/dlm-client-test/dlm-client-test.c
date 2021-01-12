@@ -35,9 +35,12 @@ static void dump_lease_resources(int lease_fd)
 {
 	drmModeObjectListPtr ol = drmModeGetLease(lease_fd);
 	if (!ol) {
-		fprintf(stderr, "drmModeGetLease failed\n");
+		fprintf(
+		    stderr,
+		    "drmModeGetLease failed. Received fd is not a DRM lease\n");
 		return;
 	}
+	free(ol);
 
 	drmModeRes *res = drmModeGetResources(lease_fd);
 	if (!res) {
