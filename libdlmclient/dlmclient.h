@@ -25,10 +25,10 @@ extern "C" {
 
 #include <stdbool.h>
 
-/*
+/**
  * @brief Enable debug logging
- * @param enable [in] true - enable debug logging
- *                   false - disable debug logging
+ *
+ * @param[in] enable enable/disable debug logging
  */
 void dlm_enable_debug_log(bool enable);
 
@@ -40,18 +40,20 @@ struct dlm_lease;
 /**
  * @brief  Get a DRM lease from the lease manager
  *
- * @param id [in] id of lease to request
+ * @param[in] name requested lease
  * @return A pointer to a lease handle on success.
  *         On error this function returns NULL and errno is set accordingly.
  *
  *  Possible errors:
  *
- *  EACCESS         Cannot access lease manager socket directory
- *  EACCESS         Lease request denied by lease manager
- *  ENAMETOOLONG    The path to the lease manager socket directory is too long
- *  ENOENT          Lease manager or requested lease not available
- *  ENOMEM          Out of memory during operation
- *  EPROTO          Protocol error in communication with lease manager
+ *  errno        |  Meaning
+ *  -------------|-------------------------------------------------------------
+ *  EACCESS      |  Cannot access lease manager socket directory
+ *  EACCESS      |  Lease request denied by lease manager
+ *  ENAMETOOLONG |  The path to the lease manager socket directory is too long
+ *  ENOENT       |  Lease manager or requested lease not available
+ *  ENOMEM       |  Out of memory during operation
+ *  EPROTO       |  Protocol error in communication with lease manager
  *
  *  This list is not exhaustive, and errno may be set to other error codes,
  *  especially those related to socket communication.
@@ -64,14 +66,14 @@ struct dlm_lease *dlm_get_lease(char *name);
  * @details Release a lease handle.  The lease handle will be invalidated and
  *          the associated DRM lease wil be revoked.  Any fd's retrieved from
  *          dlm_lease_fd() will be closed.
- * @param handle [in] pointer to lease handle
+ * @param[in] lease pointer to lease handle
  */
 void dlm_release_lease(struct dlm_lease *lease);
 
 /**
  * @brief Get a DRM Master fd from a valid lease handle
  *
- * @param lease [in] valid pointer to a lease handle
+ * @param[in] lease pointer to a lease handle
  * @return A DRM Master file descriptor for the lease on success.
  *         -1 is returned when called with a NULL lease handle.
  */
