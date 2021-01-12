@@ -26,12 +26,12 @@
 static void usage(const char *name)
 {
 	fprintf(stderr,
-		"%s <connector_id>\n"
-		"\tconnector_id: Valid value is CONNECTOR-ID provided by DRM\n",
+		"%s <lease name>\n"
+		"\tlease name: Name of lease to check\n",
 		name);
 }
 
-static void dumpDRMResources(int lease_fd)
+static void dump_lease_resources(int lease_fd)
 {
 	drmModeObjectListPtr ol = drmModeGetLease(lease_fd);
 	if (!ol) {
@@ -85,7 +85,7 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	dumpDRMResources(lease_fd);
+	dump_lease_resources(lease_fd);
 	dlm_release_lease(lease);
 	return EXIT_SUCCESS;
 }
