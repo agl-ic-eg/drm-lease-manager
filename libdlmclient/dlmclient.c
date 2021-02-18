@@ -37,7 +37,7 @@ struct dlm_lease {
 	int lease_fd;
 };
 
-static bool lease_connect(struct dlm_lease *lease, char *name)
+static bool lease_connect(struct dlm_lease *lease, const char *name)
 {
 	struct sockaddr_un sa = {
 	    .sun_family = AF_UNIX,
@@ -129,7 +129,7 @@ static bool lease_recv_fd(struct dlm_lease *lease)
 	return true;
 }
 
-struct dlm_lease *dlm_get_lease(char *name)
+struct dlm_lease *dlm_get_lease(const char *name)
 {
 	struct dlm_lease *lease = calloc(1, sizeof(struct dlm_lease));
 	if (!lease) {

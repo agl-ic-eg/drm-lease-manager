@@ -58,7 +58,7 @@ struct dlm_lease;
  *  This list is not exhaustive, and errno may be set to other error codes,
  *  especially those related to socket communication.
  */
-struct dlm_lease *dlm_get_lease(char *name);
+struct dlm_lease *dlm_get_lease(const char *name);
 
 /**
  * @brief  Release a lease handle
