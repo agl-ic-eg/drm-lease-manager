@@ -2,6 +2,10 @@ dlmclient_sources = files(
     'dlmclient.c'
 )
 
+dlmclient_headers = files(
+    'dlmclient.h'
+)
+
 libdlmclient = library(
     'dlmclient',
     sources: dlmclient_sources,
@@ -16,7 +20,7 @@ dlmclient_dep = declare_dependency(
 )
 
 
-install_headers('dlmclient.h', subdir: 'libdlmclient')
+install_headers(dlmclient_headers, subdir: 'libdlmclient')
 
 pkg.generate(
     name: 'libdlmclient',
@@ -26,7 +30,7 @@ pkg.generate(
     description: 'DRM lease manager client library',
 )
 
-public_header_dir = meson.current_source_dir()
+dlmclient_header_dir = meson.current_source_dir()
 subdir('docs')
 
 if enable_tests
