@@ -66,40 +66,6 @@ static void client_gst_socket_status(int socket_fd, struct test_config *config)
 	return;
 }
 
-static int receive_fd_from_socket(int sockfd)
-{
-	union {
-		struct cmsghdr align;
-		char buf[CMSG_SPACE(sizeof(int))];
-	} u;
-
-	char data;
-	struct iovec iov = {.iov_base = &data, .iov_len = sizeof(data)};
-	struct msghdr msg = {
-	    .msg_iov = &iov,
-	    .msg_iovlen = 1,
-	    .msg_control = u.buf,
-	    .msg_controllen = sizeof(u.buf),
-	};
-
-	if (recvmsg(sockfd, &msg, 0) < 0)
-		return -1;
-
-	int recv_fd = -1;
-	for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
-	     cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-		ck_assert_int_eq(cmsg->cmsg_level, SOL_SOCKET);
-
-		if (cmsg->cmsg_type != SCM_RIGHTS)
-			continue;
-
-		int nfds = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-		ck_assert_int_eq(nfds, 1);
-		recv_fd = *(int *)CMSG_DATA(cmsg);
-	}
-	return recv_fd;
-}
-
 static void *test_client_thread(void *arg)
 {
 	struct client_state *cstate = arg;
@@ -132,7 +98,7 @@ static void *test_client_thread(void *arg)
 	client_gst_socket_status(client, config);
 
 	if (config->has_data) {
-		config->received_fd = receive_fd_from_socket(client);
+		config->received_fd = receive_lease_fd(client);
 	}
 
 	cstate->socket_fd = client;

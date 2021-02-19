@@ -346,39 +346,21 @@ bool ls_send_fd(struct ls *ls, struct ls_client *client, int fd)
 	assert(ls);
 	assert(client);
 
+	struct ls_server *serv = client->serv;
+
 	if (fd < 0)
 		return false;
 
-	char data[1];
-	struct iovec iov = {
-	    .iov_base = data,
-	    .iov_len = sizeof(data),
-	};
-
-	char ctrl_buf[CMSG_SPACE(sizeof(int))] = {0};
-
-	struct msghdr msg = {
-	    .msg_iov = &iov,
-	    .msg_iovlen = 1,
-	    .msg_controllen = sizeof(ctrl_buf),
-	    .msg_control = ctrl_buf,
-	};
-
-	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-	cmsg->cmsg_level = SOL_SOCKET;
-	cmsg->cmsg_type = SCM_RIGHTS;
-	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
-	*((int *)CMSG_DATA(cmsg)) = fd;
-
-	struct ls_server *serv = client->serv;
-
-	if (sendmsg(client->socket.fd, &msg, 0) < 0) {
+	if (!send_lease_fd(client->socket.fd, fd)) {
 		DEBUG_LOG("sendmsg failed on %s: %s\n", serv->address.sun_path,
 			  strerror(errno));
 		return false;
 	}
 
-	INFO_LOG("Lease request granted on %s\n", serv->address.sun_path);
+	if (fd > 0)
+		INFO_LOG("Lease request granted on %s\n",
+			 serv->address.sun_path);
+
 	return true;
 }
 

@@ -82,66 +82,27 @@ static bool lease_send_request(struct dlm_lease *lease, enum dlm_opcode opcode)
 
 static bool lease_recv_fd(struct dlm_lease *lease)
 {
-	char ctrl_buf[CMSG_SPACE(sizeof(int))] = {0};
-	char data[1] = {0};
+	lease->lease_fd = receive_lease_fd(lease->dlm_server_sock);
 
-	struct iovec iov[1];
-	iov[0].iov_base = data;
-	iov[0].iov_len = sizeof(data);
-
-	struct msghdr msg = {
-	    .msg_control = ctrl_buf,
-	    .msg_controllen = CMSG_SPACE(sizeof(int)),
-	    .msg_iov = iov,
-	    .msg_iovlen = 1,
-	};
-
-	int ret;
-	while ((ret = recvmsg(lease->dlm_server_sock, &msg, 0)) <= 0) {
-		if (ret == 0) {
-			errno = EACCES;
-			DEBUG_LOG("Request rejected by DRM lease manager\n");
-			// TODO: Report why the request was rejected.
-			return false;
-		}
-		if (errno != EINTR) {
-			DEBUG_LOG("Socket data receive error: %s\n",
-				  strerror(errno));
-			return false;
-		}
-	}
-
-	lease->lease_fd = -1;
-	struct cmsghdr *cmsg;
-	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
-	     cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-		if (cmsg->cmsg_level == SOL_SOCKET &&
-		    cmsg->cmsg_type == SCM_RIGHTS) {
-			int nfds = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-			int *fds = (int *)CMSG_DATA(cmsg);
-
-			if (nfds == 1) {
-				lease->lease_fd = fds[0];
-				break;
-			}
-
-			DEBUG_LOG(
-			    "Expected 1 fd from lease manager. Received %d\n",
-			    nfds);
-			/* Close any unexpected fds so we don't leak them. */
-			for (int i = 0; i < nfds; i++)
-				close(fds[i]);
-			break;
-		}
-	}
-
-	if (lease->lease_fd < 0) {
-		DEBUG_LOG("Expected data not received from lease manager\n");
-		errno = EPROTO;
-		return false;
-	}
+	if (lease->lease_fd < 0)
+		goto err;
 
 	return true;
+
+err:
+	switch (errno) {
+	case EACCES:
+		DEBUG_LOG("Lease request rejected by DRM lease manager\n");
+		break;
+	case EPROTO:
+		DEBUG_LOG("Unexpected data received from lease manager\n");
+		break;
+	default:
+		DEBUG_LOG("Lease manager receive data error: %s\n",
+			  strerror(errno));
+		break;
+	}
+	return false;
 }
 
 struct dlm_lease *dlm_get_lease(const char *name)
