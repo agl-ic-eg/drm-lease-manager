@@ -28,6 +28,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include "dlm-protocol.h"
 #include "socket-path.h"
 
 #define DEFAULT_RECV_TIMEOUT (100) // timeout in ms to receive data from server
@@ -38,6 +39,14 @@ struct client_state {
 	int socket_fd;
 	struct test_config *config;
 };
+
+static void send_lease_request(int socket, enum dlm_opcode opcode)
+{
+	struct dlm_client_request req = {
+	    .opcode = opcode,
+	};
+	send_dlm_client_request(socket, &req);
+}
 
 static void client_gst_socket_status(int socket_fd, struct test_config *config)
 {
@@ -104,7 +113,7 @@ static void *test_client_thread(void *arg)
 	    sockaddr_set_lease_server_path(&address, config->lease->name),
 	    true);
 
-	int client = socket(PF_UNIX, SOCK_STREAM, 0);
+	int client = socket(PF_UNIX, SOCK_SEQPACKET, 0);
 	ck_assert_int_ge(client, 0);
 
 	int ret;
@@ -114,6 +123,8 @@ static void *test_client_thread(void *arg)
 		close(client);
 		return NULL;
 	}
+
+	send_lease_request(client, DLM_GET_LEASE);
 
 	if (!config->recv_timeout)
 		config->recv_timeout = DEFAULT_RECV_TIMEOUT;
@@ -125,6 +136,7 @@ static void *test_client_thread(void *arg)
 	}
 
 	cstate->socket_fd = client;
+	send_lease_request(client, DLM_RELEASE_LEASE);
 
 	return NULL;
 }

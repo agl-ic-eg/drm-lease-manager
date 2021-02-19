@@ -14,6 +14,8 @@
  */
 
 #include "dlmclient.h"
+
+#include "dlm-protocol.h"
 #include "log.h"
 #include "socket-path.h"
 
@@ -46,7 +48,7 @@ static bool lease_connect(struct dlm_lease *lease, const char *name)
 	if (!sockaddr_set_lease_server_path(&sa, name))
 		return false;
 
-	int dlm_server_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	int dlm_server_sock = socket(AF_UNIX, SOCK_SEQPACKET, 0);
 	if (dlm_server_sock < 0) {
 		DEBUG_LOG("Socket creation failed: %s\n", strerror(errno));
 		return false;
@@ -62,6 +64,19 @@ static bool lease_connect(struct dlm_lease *lease, const char *name)
 		return false;
 	}
 	lease->dlm_server_sock = dlm_server_sock;
+	return true;
+}
+
+static bool lease_send_request(struct dlm_lease *lease, enum dlm_opcode opcode)
+{
+	struct dlm_client_request request = {
+	    .opcode = opcode,
+	};
+
+	if (!send_dlm_client_request(lease->dlm_server_sock, &request)) {
+		DEBUG_LOG("Socket data send error: %s\n", strerror(errno));
+		return false;
+	}
 	return true;
 }
 
@@ -131,6 +146,7 @@ static bool lease_recv_fd(struct dlm_lease *lease)
 
 struct dlm_lease *dlm_get_lease(const char *name)
 {
+	int saved_errno;
 	struct dlm_lease *lease = calloc(1, sizeof(struct dlm_lease));
 	if (!lease) {
 		DEBUG_LOG("can't allocate memory : %s\n", strerror(errno));
@@ -142,13 +158,19 @@ struct dlm_lease *dlm_get_lease(const char *name)
 		return NULL;
 	}
 
-	if (!lease_recv_fd(lease)) {
-		close(lease->dlm_server_sock);
-		free(lease);
-		return NULL;
-	}
+	if (!lease_send_request(lease, DLM_GET_LEASE))
+		goto err;
+
+	if (!lease_recv_fd(lease))
+		goto err;
 
 	return lease;
+
+err:
+	saved_errno = errno;
+	dlm_release_lease(lease);
+	errno = saved_errno;
+	return NULL;
 }
 
 void dlm_release_lease(struct dlm_lease *lease)
@@ -156,6 +178,7 @@ void dlm_release_lease(struct dlm_lease *lease)
 	if (!lease)
 		return;
 
+	lease_send_request(lease, DLM_RELEASE_LEASE);
 	close(lease->lease_fd);
 	close(lease->dlm_server_sock);
 	free(lease);
