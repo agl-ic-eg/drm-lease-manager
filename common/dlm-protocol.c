@@ -64,3 +64,86 @@ bool send_dlm_client_request(int socket, struct dlm_client_request *request)
 	}
 	return true;
 }
+
+int receive_lease_fd(int socket)
+{
+	int lease_fd = -1;
+	char ctrl_buf[CMSG_SPACE(sizeof(lease_fd))];
+
+	char data;
+	struct iovec iov = {.iov_base = &data, .iov_len = sizeof(data)};
+	struct msghdr msg = {
+	    .msg_iov = &iov,
+	    .msg_iovlen = 1,
+	    .msg_control = ctrl_buf,
+	    .msg_controllen = sizeof(ctrl_buf),
+	};
+
+	ssize_t len;
+	while ((len = recvmsg(socket, &msg, 0)) <= 0) {
+		if (len == 0) {
+			errno = EACCES;
+			goto err;
+		}
+
+		if (errno != EINTR)
+			goto err;
+	}
+
+	struct cmsghdr *cmsg;
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL;
+	     cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		if (cmsg->cmsg_level == SOL_SOCKET &&
+		    cmsg->cmsg_type == SCM_RIGHTS) {
+			int nfds = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+			int *fds = (int *)CMSG_DATA(cmsg);
+
+			if (nfds == 1) {
+				lease_fd = fds[0];
+				break;
+			}
+
+			/* Close any unexpected fds so we don't leak them. */
+			for (int i = 0; i < nfds; i++)
+				close(fds[i]);
+			break;
+		}
+	}
+
+	if (lease_fd < 0) {
+		errno = EPROTO;
+		goto err;
+	}
+
+err:
+	return lease_fd;
+}
+
+bool send_lease_fd(int socket, int lease)
+{
+	char data;
+	struct iovec iov = {
+	    .iov_base = &data,
+	    .iov_len = sizeof(data),
+	};
+
+	char ctrl_buf[CMSG_SPACE(sizeof(lease))] = {0};
+
+	struct msghdr msg = {
+	    .msg_iov = &iov,
+	    .msg_iovlen = 1,
+	    .msg_controllen = sizeof(ctrl_buf),
+	    .msg_control = ctrl_buf,
+	};
+
+	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(lease));
+	*((int *)CMSG_DATA(cmsg)) = lease;
+
+	if (sendmsg(socket, &msg, 0) < 0)
+		return false;
+
+	return true;
+}

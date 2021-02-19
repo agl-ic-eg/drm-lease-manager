@@ -29,4 +29,6 @@ struct dlm_client_request {
 
 bool receive_dlm_client_request(int socket, struct dlm_client_request *request);
 bool send_dlm_client_request(int socket, struct dlm_client_request *request);
+int receive_lease_fd(int socket);
+bool send_lease_fd(int socket, int lease);
 #endif
