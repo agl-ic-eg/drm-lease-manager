@@ -1,4 +1,5 @@
 libdlmcommon_sources = [
+        'dlm-protocol.c',
         'socket-path.c',
         'log.c'
 ]

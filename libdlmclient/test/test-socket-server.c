@@ -25,6 +25,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include "dlm-protocol.h"
 #include "socket-path.h"
 #include "test-helpers.h"
 
@@ -56,6 +57,13 @@ static void send_fd_list_over_socket(int socket, int nfds, int *fds)
 	free(buf);
 }
 
+static void expect_client_command(int socket, enum dlm_opcode opcode)
+{
+	struct dlm_client_request req;
+	ck_assert_int_eq(receive_dlm_client_request(socket, &req), true);
+	ck_assert_int_eq(req.opcode, opcode);
+}
+
 struct server_state {
 	pthread_t tid;
 	pthread_mutex_t lock;
@@ -77,7 +85,7 @@ static void *test_server_thread(void *arg)
 	ck_assert_int_eq(
 	    sockaddr_set_lease_server_path(&address, config->lease_name), true);
 
-	int server = socket(PF_UNIX, SOCK_STREAM, 0);
+	int server = socket(PF_UNIX, SOCK_SEQPACKET, 0);
 	ck_assert_int_ge(server, 0);
 
 	unlink(address.sun_path);
@@ -102,6 +110,8 @@ static void *test_server_thread(void *arg)
 		return NULL;
 	}
 
+	expect_client_command(client, DLM_GET_LEASE);
+
 	if (config->send_no_data)
 		goto done;
 
@@ -120,6 +130,7 @@ static void *test_server_thread(void *arg)
 		config->fds[i] = get_dummy_fd();
 
 	send_fd_list_over_socket(client, config->nfds, config->fds);
+	expect_client_command(client, DLM_RELEASE_LEASE);
 done:
 	close(client);
 	close(server);

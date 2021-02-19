@@ -14,6 +14,8 @@
  */
 
 #include "lease-server.h"
+
+#include "dlm-protocol.h"
 #include "log.h"
 #include "socket-path.h"
 
@@ -75,13 +77,13 @@ struct ls {
 	int nservers;
 };
 
-static struct ls_client *client_connect(struct ls *ls, struct ls_server *serv)
+static void client_connect(struct ls *ls, struct ls_server *serv)
 {
 	int cfd = accept(serv->listen.fd, NULL, NULL);
 	if (cfd < 0) {
 		DEBUG_LOG("accept failed on %s: %s\n", serv->address.sun_path,
 			  strerror(errno));
-		return NULL;
+		return;
 	}
 
 	struct ls_client *client = NULL;
@@ -94,23 +96,44 @@ static struct ls_client *client_connect(struct ls *ls, struct ls_server *serv)
 	}
 	if (!client) {
 		close(cfd);
-		return NULL;
+		return;
 	}
 
 	client->socket.fd = cfd;
 
 	struct epoll_event ev = {
-	    .events = POLLHUP,
+	    .events = POLLIN,
 	    .data.ptr = &client->socket,
 	};
 	if (epoll_ctl(ls->epoll_fd, EPOLL_CTL_ADD, cfd, &ev)) {
 		DEBUG_LOG("epoll_ctl add failed: %s\n", strerror(errno));
 		close(cfd);
-		return NULL;
+		return;
 	}
 
 	client->is_connected = true;
-	return client;
+}
+
+static int parse_client_request(struct ls_socket *client)
+{
+	int ret = -1;
+	struct dlm_client_request hdr;
+	if (!receive_dlm_client_request(client->fd, &hdr))
+		return ret;
+
+	switch (hdr.opcode) {
+	case DLM_GET_LEASE:
+		ret = LS_REQ_GET_LEASE;
+		break;
+	case DLM_RELEASE_LEASE:
+		ret = LS_REQ_RELEASE_LEASE;
+		break;
+	default:
+		ERROR_LOG("Unexpected client request received\n");
+		break;
+	};
+
+	return ret;
 }
 
 static int create_socket_lock(struct sockaddr_un *addr)
@@ -165,7 +188,7 @@ static bool server_setup(struct ls *ls, struct ls_server *serv,
 
 	address->sun_family = AF_UNIX;
 
-	int server_socket = socket(PF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	int server_socket = socket(PF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK, 0);
 	if (server_socket < 0) {
 		DEBUG_LOG("Socket creation failed: %s\n", strerror(errno));
 		return false;
@@ -296,25 +319,20 @@ bool ls_get_request(struct ls *ls, struct ls_req *req)
 		struct ls_socket *sock = ev.data.ptr;
 		assert(sock);
 
-		struct ls_server *server;
-		struct ls_client *client;
-
 		if (sock->is_server) {
-			if (!(ev.events & POLLIN))
-				continue;
-
-			server = sock->server;
-			client = client_connect(ls, server);
-			if (client)
-				request = LS_REQ_GET_LEASE;
-		} else {
-			if (!(ev.events & POLLHUP))
-				continue;
-
-			client = sock->client;
-			server = client->serv;
-			request = LS_REQ_RELEASE_LEASE;
+			if (ev.events & POLLIN)
+				client_connect(ls, sock->server);
+			continue;
 		}
+
+		if (ev.events & POLLIN)
+			request = parse_client_request(sock);
+
+		if (request < 0 && (ev.events & POLLHUP))
+			request = LS_REQ_RELEASE_LEASE;
+
+		struct ls_client *client = sock->client;
+		struct ls_server *server = client->serv;
 
 		req->lease_handle = server->lease_handle;
 		req->client = client;
