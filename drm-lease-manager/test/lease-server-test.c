@@ -197,6 +197,7 @@ START_TEST(issue_lease_request_and_release)
 	get_and_check_request(ls, &test_lease, LS_REQ_GET_LEASE);
 	test_client_stop(cstate);
 	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
+	ls_destroy(ls);
 }
 END_TEST
 
@@ -216,6 +217,7 @@ START_TEST(issue_lease_request_and_early_release)
 	test_client_stop(cstate);
 	get_and_check_request(ls, &test_lease, LS_REQ_GET_LEASE);
 	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
+	ls_destroy(ls);
 }
 END_TEST
 
@@ -269,6 +271,7 @@ START_TEST(issue_multiple_lease_requests)
 	ck_assert_int_eq(accepted_config.connection_completed, true);
 	for (int i = 0; i < nextra_clients; i++)
 		ck_assert_int_eq(extra_configs[i].connection_completed, false);
+	ls_destroy(ls);
 }
 END_TEST
 
@@ -316,6 +319,7 @@ START_TEST(send_fd_to_client)
 	ck_assert_int_eq(default_test_config.connection_completed, true);
 	ck_assert_int_eq(default_test_config.has_data, true);
 	check_fd_equality(test_fd, default_test_config.received_fd);
+	ls_destroy(ls);
 }
 END_TEST
 
@@ -345,6 +349,7 @@ START_TEST(ls_send_fd_is_noop_when_fd_is_invalid)
 	get_and_check_request(ls, &test_lease, LS_REQ_RELEASE_LEASE);
 	ck_assert_int_eq(default_test_config.connection_completed, true);
 	ck_assert_int_eq(default_test_config.has_data, false);
+	ls_destroy(ls);
 }
 END_TEST
 
