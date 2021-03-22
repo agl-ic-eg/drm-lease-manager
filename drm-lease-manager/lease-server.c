@@ -329,7 +329,7 @@ bool ls_get_request(struct ls *ls, struct ls_req *req)
 			request = parse_client_request(sock);
 
 		if (request < 0 && (ev.events & POLLHUP))
-			request = LS_REQ_RELEASE_LEASE;
+			request = LS_REQ_CLIENT_DISCONNECT;
 
 		struct ls_client *client = sock->client;
 		struct ls_server *server = client->serv;

@@ -331,6 +331,7 @@ static struct lease *lease_create(struct lm *lm, drmModeConnectorPtr connector)
 	lease->object_ids[lease->nobject_ids++] = connector->connector_id;
 
 	lease->is_granted = false;
+	lease->lease_fd = -1;
 
 	return lease;
 
@@ -417,7 +418,9 @@ void lm_destroy(struct lm *lm)
 	assert(lm);
 
 	for (int i = 0; i < lm->nleases; i++) {
-		lm_lease_revoke(lm, (struct lease_handle *)lm->leases[i]);
+		struct lease_handle *lease_handle = &lm->leases[i]->base;
+		lm_lease_revoke(lm, lease_handle);
+		lm_lease_close(lease_handle);
 		lease_free(lm->leases[i]);
 	}
 
@@ -448,17 +451,24 @@ int lm_lease_grant(struct lm *lm, struct lease_handle *handle)
 		return -1;
 	}
 
-	lease->lease_fd =
+	int lease_fd =
 	    drmModeCreateLease(lm->drm_fd, lease->object_ids,
 			       lease->nobject_ids, 0, &lease->lessee_id);
-	if (lease->lease_fd < 0) {
+	if (lease_fd < 0) {
 		ERROR_LOG("drmModeCreateLease failed on lease %s: %s\n",
 			  lease->base.name, strerror(errno));
 		return -1;
 	}
 
 	lease->is_granted = true;
-	return lease->lease_fd;
+
+	int old_lease_fd = lease->lease_fd;
+	lease->lease_fd = lease_fd;
+
+	if (old_lease_fd >= 0)
+		close_after_lease_transition(lease, old_lease_fd);
+
+	return lease_fd;
 }
 
 int lm_lease_transfer(struct lm *lm, struct lease_handle *handle)
@@ -470,15 +480,12 @@ int lm_lease_transfer(struct lm *lm, struct lease_handle *handle)
 	if (!lease->is_granted)
 		return -1;
 
-	int old_lease_fd = dup(lease->lease_fd);
-
 	lm_lease_revoke(lm, handle);
 	if (lm_lease_grant(lm, handle) < 0) {
-		close(old_lease_fd);
+		lm_lease_close(handle);
 		return -1;
 	}
 
-	close_after_lease_transition(lease, old_lease_fd);
 	return lease->lease_fd;
 }
 
@@ -494,6 +501,14 @@ void lm_lease_revoke(struct lm *lm, struct lease_handle *handle)
 
 	drmModeRevokeLease(lm->drm_fd, lease->lessee_id);
 	cancel_lease_transition_thread(lease);
-	close(lease->lease_fd);
 	lease->is_granted = false;
+}
+
+void lm_lease_close(struct lease_handle *handle)
+{
+	assert(handle);
+
+	struct lease *lease = (struct lease *)handle;
+	close(lease->lease_fd);
+	lease->lease_fd = -1;
 }

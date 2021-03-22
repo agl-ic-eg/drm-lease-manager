@@ -24,6 +24,7 @@ struct ls_client;
 enum ls_req_type {
 	LS_REQ_GET_LEASE,
 	LS_REQ_RELEASE_LEASE,
+	LS_REQ_CLIENT_DISCONNECT,
 };
 
 struct ls_req {
