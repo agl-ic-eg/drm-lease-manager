@@ -28,15 +28,17 @@ static void usage(const char *progname)
 	       "Options:\n"
 	       "-h, --help \tPrint this help\n"
 	       "-v, --verbose \tEnable verbose debug messages\n"
-	       "-t, --lease-transfer \tAllow lease transfter to new clients\n",
+	       "-t, --lease-transfer \tAllow lease transfter to new clients\n"
+	       "-k, --keep-on-crash \tDon't close lease on client crash\n",
 	       progname);
 }
 
-const char *opts = "vth";
+const char *opts = "vtkh";
 const struct option options[] = {
     {"help", no_argument, NULL, 'h'},
     {"verbose", no_argument, NULL, 'v'},
     {"lease-transfer", no_argument, NULL, 't'},
+    {"keep-on-crash", no_argument, NULL, 'k'},
     {NULL, 0, NULL, 0},
 };
 
@@ -46,6 +48,7 @@ int main(int argc, char **argv)
 
 	bool debug_log = false;
 	bool can_transfer_leases = false;
+	bool keep_on_crash = false;
 
 	int c;
 	while ((c = getopt_long(argc, argv, opts, options, NULL)) != -1) {
@@ -56,6 +59,9 @@ int main(int argc, char **argv)
 			break;
 		case 't':
 			can_transfer_leases = true;
+			break;
+		case 'k':
+			keep_on_crash = true;
 			break;
 		case 'h':
 			ret = EXIT_SUCCESS;
@@ -122,9 +128,14 @@ int main(int argc, char **argv)
 			break;
 		}
 		case LS_REQ_RELEASE_LEASE:
+		case LS_REQ_CLIENT_DISCONNECT:
 			ls_disconnect_client(ls, req.client);
 			req.lease_handle->user_data = NULL;
 			lm_lease_revoke(lm, req.lease_handle);
+
+			if (!keep_on_crash || req.type == LS_REQ_RELEASE_LEASE)
+				lm_lease_close(req.lease_handle);
+
 			break;
 		default:
 			ERROR_LOG("Internal error: Invalid lease request\n");
